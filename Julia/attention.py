@@ -1,6 +1,7 @@
 import numpy as np
 from statistics import mean
 from matplotlib import pyplot as plt
+from scipy.special import softmax
 
 def get_atts_mean(attentions, i, example, segment, layer, head, read=True, mem=False):
     if mem:
@@ -144,10 +145,50 @@ def print_heads(example=0, segment=1, multiple=False):
         ax.set_xticklabels(t,fontdict={'fontsize': 10}, rotation=90)
         i += 1
 
-def print_by_layer(example=0, segment=1, layer=0, multiple=False):
-    """
-    For each head in each layer
-    """
+def get_atts_sum_head(attentions, i, layer, head, read=True, mem=False):
+    matrix = attentions[layer][head]
+    if mem:
+        if read:
+            vector = softmax(np.mean(matrix[1:11], axis=0))
+            return [
+                vector[0],
+                np.sum(vector[1:11]),
+                vector[11],
+                np.sum(vector[12:-1]),
+                vector[-1],
+                # entropy(vector[12:-1], base=2)
+                ]
+        else:
+            return [
+                np.sum(matrix[0][1:11], axis=0),
+                np.sum(softmax(np.mean(matrix[1:11], axis=0))[1:11]),
+                np.sum(matrix[11][1:11], axis=0),
+                np.sum(softmax(np.mean(matrix[12:-1], axis=0))[1:11]),
+                np.sum(matrix[-1][1:11], axis=0),
+                # entropy(softmax(np.mean(matrix[12:-1], axis=0))[1:11], base=2)
+                ]
+    else:
+        if read:
+            return [
+                matrix[i][0],
+                np.sum(matrix[i][1:11]),
+                matrix[i][11],
+                np.sum(matrix[i][12:-1]),
+                matrix[i][-1],
+                # entropy(matrix[i][12:-1], base=2)
+                ]
+        else:
+            matrix = softmax(matrix, axis=0)
+            return [
+                matrix[0][i],
+                np.sum(matrix[1:11], axis=0)[i],
+                matrix[11][i],
+                np.sum(matrix[12:-1], axis=0)[i],
+                matrix[-1][i],
+                # entropy(matrix[12:-1][i], base=2)
+                ]
+
+def print_by_layer_head(attentions, layer=0):
     di = {
         "CLS1_read": [],
         "CLS1_write": [],
@@ -167,19 +208,104 @@ def print_by_layer(example=0, segment=1, layer=0, multiple=False):
     for key in di:
         for head in range(12):
             if key[:3] == "MEM":
-                di[key].append(get_atts_mean(0, example, segment, layer, head, mem=True, read=key.endswith("read")))
+                di[key].append(get_atts_sum_head(attentions, 0, layer, head, mem=True, read=key.endswith("read")))
             else:
-                di[key].append(get_atts_mean(ind[key[:4]], example, segment, layer, head, read=key.endswith("read")))
+                di[key].append(get_atts_sum_head(attentions, ind[key[:4]], layer, head, read=key.endswith("read")))
 
     t = ["CLS", "MEM", "SEP1", "tokens", "SEP2"]
     fig = plt.figure(figsize=(30, 30))
     i = 1
     for key in di:
         ax = fig.add_subplot(4, 4, i)
-        ax.matshow(di[key], cmap='Reds')
+        cax = ax.matshow(di[key], cmap='Reds', vmin = 0, vmax = 1)
+        fig.colorbar(cax)
         ax.set_title(key)
         ax.set_xticks(range(len(t)))
         ax.set_yticks(range(12))
         ax.set_yticklabels(range(12), fontdict={'fontsize': 10})
         ax.set_xticklabels(t,fontdict={'fontsize': 10}, rotation=90)
         i += 1
+    plt.savefig(f"grads_heads_{layer}.png")
+
+
+def get_atts_sum_grad(attentions, i, layer, read=True, mem=False):
+    matrix = attentions[layer]
+    if mem:
+        if read:
+            vector = softmax(np.mean(matrix[1:11], axis=0))
+            return [
+                vector[0],
+                np.sum(vector[1:11]),
+                vector[11],
+                np.sum(vector[12:-1]),
+                vector[-1],
+                # entropy(vector[12:-1], base=2)
+                ]
+        else:
+            return [
+                np.sum(matrix[0][1:11], axis=0),
+                np.sum(softmax(np.mean(matrix[1:11], axis=0))[1:11]),
+                np.sum(matrix[11][1:11], axis=0),
+                np.sum(softmax(np.mean(matrix[12:-1], axis=0))[1:11]),
+                np.sum(matrix[-1][1:11], axis=0),
+                # entropy(softmax(np.mean(matrix[12:-1], axis=0))[1:11], base=2)
+                ]
+    else:
+        if read:
+            return [
+                matrix[i][0],
+                np.sum(matrix[i][1:11]),
+                matrix[i][11],
+                np.sum(matrix[i][12:-1]),
+                matrix[i][-1],
+                # entropy(matrix[i][12:-1], base=2)
+                ]
+        else:
+            matrix = softmax(matrix, axis=0)
+            return [
+                matrix[0][i],
+                np.sum(matrix[1:11], axis=0)[i],
+                matrix[11][i],
+                np.sum(matrix[12:-1], axis=0)[i],
+                matrix[-1][i],
+                # entropy(matrix[12:-1][i], base=2)
+                ]
+
+def print_by_layer_grad(attentions):
+    di = {
+        "CLS1_read": [],
+        "CLS1_write": [],
+        "SEP1_read": [],
+        "SEP1_write": [],
+        "MEM_read": [],
+        "MEM_write": [],
+        "SEP2_read": [],
+        "SEP2_write": [],
+    }
+    ind = {
+        "CLS1": 0,
+        "SEP1": 1,
+        "SEP2": -1
+    }
+
+    for key in di:
+        for layer in range(12):
+            if key[:3] == "MEM":
+                di[key].append(get_atts_sum_grad(attentions, 0, layer, mem=True, read=key.endswith("read")))
+            else:
+                di[key].append(get_atts_sum_grad(attentions, ind[key[:4]], layer, read=key.endswith("read")))
+
+    t = ["CLS", "MEM", "SEP1", "tokens", "SEP2"]
+    fig = plt.figure(figsize=(30, 30))
+    i = 1
+    for key in di:
+        ax = fig.add_subplot(4, 4, i)
+        cax = ax.matshow(di[key], cmap='Reds', vmin = 0, vmax = 1)
+        fig.colorbar(cax)
+        ax.set_title(key)
+        ax.set_xticks(range(len(t)))
+        ax.set_yticks(range(12))
+        ax.set_yticklabels(range(12), fontdict={'fontsize': 10})
+        ax.set_xticklabels(t,fontdict={'fontsize': 10}, rotation=90)
+        i += 1
+    plt.savefig("grads_layers.png")
